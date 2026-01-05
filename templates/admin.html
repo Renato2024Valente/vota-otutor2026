@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Gestão • Resultados{% endblock %}
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+{% endblock %}
+{% block content %}
+<div class="d-flex flex-column flex-md-row gap-2 justify-content-between align-items-md-center">
+  <div>
+    <h1 class="h3 mb-0">Painel da Gestão</h1>
+    <div class="text-white-50">Resultados em tempo real + gerenciamento de professores.</div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-light rounded-pill" href="/admin/logout">
+      <i class="bi bi-box-arrow-right"></i> Sair
+    </a>
+  </div>
+</div>
+
+<div class="row g-3 mt-2">
+  <div class="col-12 col-xl-7">
+    <div class="glass-card">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div>
+          <div class="h5 mb-0">Resultado imediato</div>
+          <div class="text-white-50 small">Atualiza automaticamente.</div>
+        </div>
+        <div class="badge text-bg-dark px-3 py-2">
+          Total de votos: <span id="totalVotos">0</span>
+        </div>
+      </div>
+
+      <div class="chart-wrap">
+        <canvas id="chartVotos"></canvas>
+      </div>
+
+      <hr class="border-white border-opacity-10">
+
+      <div class="table-responsive">
+        <table class="table table-dark table-hover align-middle">
+          <thead>
+            <tr>
+              <th>Tutor(a)</th>
+              <th class="text-end">Votos</th>
+              <th class="text-end">Ações</th>
+            </tr>
+          </thead>
+          <tbody id="tbodyResultados"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-5">
+    <div class="glass-card">
+      <div class="h5">Gerenciar professores</div>
+      <div class="text-white-50 small">Adicionar ou remover (desativar) tutores mesmo com o site hospedado.</div>
+
+      <form id="formAddTutor" class="mt-3">
+        <label class="form-label">Adicionar tutor(a)</label>
+        <div class="input-group input-group-lg">
+          <span class="input-group-text"><i class="bi bi-person-plus"></i></span>
+          <input id="novoTutor" class="form-control" placeholder="Digite o nome do professor" />
+          <button class="btn btn-primary" type="submit">Adicionar</button>
+        </div>
+        <div class="form-text text-white-50">O nome será salvo em MAIÚSCULO.</div>
+      </form>
+
+      <div class="mt-4">
+        <div class="d-flex justify-content-between align-items-center">
+          <div class="h6 mb-0">Amostragem (16–18) quando &gt; 100 votos</div>
+          <button id="btnAtualizar" class="btn btn-sm btn-outline-light rounded-pill">
+            <i class="bi bi-arrow-repeat"></i> Atualizar
+          </button>
+        </div>
+        <div class="text-white-50 small mt-1">
+          Para tutores com mais de 100 votos, clique em <b>Gerar amostragem</b> e o sistema seleciona aleatoriamente 16 a 18 alunos.
+        </div>
+      </div>
+
+      <div class="mt-3">
+        <div id="msg" class="alert d-none" role="alert"></div>
+      </div>
+    </div>
+
+    <div class="glass-card mt-3">
+      <div class="h6 mb-2">Lista selecionada</div>
+      <div id="amostraInfo" class="text-white-50 small mb-2">Selecione um tutor com amostragem para visualizar.</div>
+      <div class="table-responsive" style="max-height: 420px;">
+        <table class="table table-dark table-striped align-middle">
+          <thead>
+            <tr>
+              <th>Aluno</th>
+              <th>Série</th>
+              <th class="text-end">Data</th>
+            </tr>
+          </thead>
+          <tbody id="tbodyAmostra"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal confirmação -->
+<div class="modal fade" id="modalConfirm" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content modal-glass">
+      <div class="modal-body p-4">
+        <div class="d-flex gap-3 align-items-start">
+          <div class="hero-icon">
+            <i class="bi bi-exclamation-triangle"></i>
+          </div>
+          <div>
+            <div class="h5 mb-1">Confirmar</div>
+            <div id="confirmText" class="text-white-50">Tem certeza?</div>
+          </div>
+        </div>
+        <div class="d-flex gap-2 justify-content-end mt-4">
+          <button class="btn btn-outline-light rounded-pill" data-bs-dismiss="modal">Cancelar</button>
+          <button id="confirmOk" class="btn btn-danger rounded-pill">Confirmar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='admin.js') }}"></script>
+{% endblock %}

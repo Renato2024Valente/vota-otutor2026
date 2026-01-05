@@ -3,6 +3,8 @@ import random
 import re
 from datetime import datetime, timezone
 
+from dotenv import load_dotenv
+
 from flask import Flask, jsonify, render_template, request, session, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -90,6 +92,9 @@ def normalize_database_url(url: str) -> str:
 
 
 def create_app():
+    # Carrega variáveis do arquivo .env (útil no Windows/local)
+    load_dotenv()
+
     app = Flask(__name__, static_folder="static", template_folder="templates")
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 

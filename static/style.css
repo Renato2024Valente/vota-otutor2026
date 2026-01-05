@@ -90,8 +90,8 @@ body{
 .form-control, .form-select, .input-group-text{
   border-radius: 16px;
   border:1px solid #ffffff22;
-  background-color: rgba(255,255,255,.55);
-  color:#70707a;
+  background-color: rgba(255,255,255,.06);
+  color:#fff;
 }
 
 .form-control::placeholder{

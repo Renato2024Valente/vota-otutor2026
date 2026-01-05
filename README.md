@@ -50,3 +50,22 @@ Acesse: http://127.0.0.1:5000
 
 ## Nota (Windows / Python 3.14)
 Se você estiver usando Python 3.14 e o pip reclamar do `psycopg-binary`, mantenha o `psycopg[binary]==3.2.13` (já está ajustado) ou use Python 3.12.
+
+
+## Deploy no Render (2 jeitos)
+
+### Jeito A (automático) — Blueprint (recomendado)
+1) Suba esse projeto no GitHub (com o arquivo `render.yaml` na raiz).
+2) No Render: **Blueprints** → **New Blueprint Instance** → selecione o repositório.
+3) O Render cria automaticamente:
+   - 1 banco Postgres (tutor2026-db)
+   - 1 Web Service (tutor-votacao-2026)
+   - e já define `DATABASE_URL` apontando pro banco.
+
+> Observação: o Blueprint já define `ADMIN_PASSWORD=1243##` e um `SECRET_KEY` aleatório.
+
+### Jeito B (usar seu banco já existente)
+Se você já criou o Postgres no Render, então no Web Service vá em **Environment** e crie:
+- `DATABASE_URL` = **Internal Database URL** do seu Postgres
+- `ADMIN_PASSWORD` = `1243##`
+- `SECRET_KEY` = uma chave grande aleatória

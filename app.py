@@ -1,431 +1,331 @@
 import os
-import random
-import re
-from datetime import datetime, timezone
-
+from datetime import datetime
 from dotenv import load_dotenv
 
-from flask import Flask, jsonify, render_template, request, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
-from werkzeug.middleware.proxy_fix import ProxyFix
 
-# -----------------------------
-# Config
-# -----------------------------
+load_dotenv()
+
 db = SQLAlchemy()
 
-DEFAULT_TUTORES = [
-    "ALINE DAL PONTE SABBAG",
-    "ALINE PRISCILA GARCIA DA SILVA",
-    "ANDREIA DE FATIMA GOMES PIEMONTE",
-    "ANTONIO JOSÉ DO SANTOS JUNIOR",
-    "CAIO HENRIQUE ESTRELA CARDIA",
-    "CLEBER ALBERTO GOMES",
-    "CRISTINA BALDINOTI",
-    "EDCARLOS DOS SANTOS",
-    "EDINEIA APARECIDA DE SOUSA",
-    "ELIANE ANDREA DIOMEDES",
-    "ELIZA GILIOLLI DOS SANTOS",
-    "FELIPE BEIRO DE ALMEIDA",
-    "FLAVIO HENRIQUE CHAVES FILHO",
-    "GABRIEL RODRIGUES DA SILVA",
-    "GISLAINE DIAS CAPUTO",
-    "GRAZIELLE CHRISTINE MARANGONI SCARMANHÃ",
-    "GRAZIELLE DE OLIVEIRA SANTOS",
-    "ITALO BERTONCINI",
-    "JANAINA TOGNON",
-    "JAQUELINE PADERES SCORSAFAVA GARCIA",
-    "JOSELILIAN LOPES MIRALHA",
-    "JULIANA DE FATIMA SILVA SEGANTIN",
-    "KLEER GONÇALVES DOS SANTOS",
-    "LEANDRO HENRIQUE DE SOUZA BEZERRA",
-    "LUCILENE ARAUJO ROMANIW RAYMUNDO",
-    "MAGDA APARECIDA DE OLIVEIRA PRADO",
-    "MARCIO ENRIQUE STANCKEVIZ",
-    "MARIA CANDIDA BRANCO DOS SANTOS",
-    "MARIA LUIZA MARTINS DE ARAUJO",
-    "MARIANA PAIVA RAMOS",
-    "MARIANA SAKER DE CASTRO PAIVA",
-    "MATHEUS SANTOS DE OLIVEIRA",
-    "MILCE FERREIRA DE MOURA",
-    "MIRIAM BEIRO DE ALMEIDA",
-    "NATHÁLIA VERONESE MARTINS",
-    "ORIEL DE OLIVEIRA E SILVA",
-    "RAQUEL CRISTINA ROSSIGALLI BOLFI",
-    "RENATO DAVID VALENTE",
-    "RODRIGO BATISTA",
-    "ROSANA APARECIDA ROSSI NOGUEIRA",
-    "SAMUEL MACEDO PERICO",
-    "SAVIA BETHANIA CAVALCANTI",
-    "SILENE BERTASSI",
-    "SONIA MARIA NABAS DOS SANTOS",
-    "SUELI BATISTETTI VICENTE",
-    "SUZANA CARTLA VIANA JANUÁRIO",
-    "VERA CLAUDIA FERRES ANSUINO",
-]
+
+# ---------------------------
+# Models
+# ---------------------------
+class Tutor(db.Model):
+    __tablename__ = "tutores"
+    id = db.Column(db.Integer, primary_key=True)
+    nome = db.Column(db.String(120), unique=True, nullable=False)
+    ativo = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    votos = db.relationship("Voto", backref="tutor", lazy=True, cascade="all, delete-orphan")
 
 
-def utcnow():
-    return datetime.now(timezone.utc)
+class Voto(db.Model):
+    __tablename__ = "votos"
+    id = db.Column(db.Integer, primary_key=True)
+    aluno_nome = db.Column(db.String(160), nullable=False)
+    serie = db.Column(db.String(40), nullable=False)
+    tutor_id = db.Column(db.Integer, db.ForeignKey("tutores.id"), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
+class Config(db.Model):
+    __tablename__ = "config"
+    id = db.Column(db.Integer, primary_key=True)
+    chave = db.Column(db.String(80), unique=True, nullable=False)
+    valor = db.Column(db.String(200), nullable=False)
+
+
+# ---------------------------
+# Helpers
+# ---------------------------
 def normalize_database_url(url: str) -> str:
     """
-    - Converte postgresql:// -> postgresql+psycopg:// (SQLAlchemy)
-    - Garante sslmode=require quando for URL do Render (seguro usar sempre)
+    - Accepts Render/Heroku-style 'postgres://' and converts to 'postgresql://'
+    - Forces psycopg driver for SQLAlchemy: 'postgresql+psycopg://'
+    - Adds sslmode=require when not present (safe default for Render external URL)
     """
     if not url:
         return url
+
     url = url.strip()
 
-    # SQLAlchemy driver
+    # Render/Heroku sometimes uses "postgres://"
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+
+    # Ensure SQLAlchemy uses psycopg3 driver (we install psycopg[binary])
     if url.startswith("postgresql://"):
         url = "postgresql+psycopg://" + url[len("postgresql://"):]
 
-    # adiciona sslmode=require se não existir
-    if "sslmode=" not in url:
+    # Add sslmode=require if not present (Render external needs it; internal tolerates it)
+    if "sslmode=" not in url and url.startswith("postgresql+psycopg://"):
         if "?" in url:
             url = url + "&sslmode=require"
         else:
             url = url + "?sslmode=require"
+
     return url
 
 
+
+def ensure_schema():
+    """
+    Pequena migração automática:
+    - Se o banco já existia (tabelas criadas sem algumas colunas), garante as colunas usadas pelo código.
+    Isso evita erros do tipo: 'column tutores.created_at does not exist'.
+    """
+    try:
+        from sqlalchemy import inspect, text as sql_text
+        insp = inspect(db.engine)
+
+        def add_column_if_missing(table: str, column: str, ddl: str):
+            if table not in insp.get_table_names():
+                return
+            cols = [c.get("name") for c in insp.get_columns(table)]
+            if column in cols:
+                return
+            print(f"[MIGRATE] adicionando coluna {table}.{column}")
+            db.session.execute(sql_text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+            db.session.commit()
+
+        # Columns used by this app
+        add_column_if_missing("tutores", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        add_column_if_missing("votos", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+
+    except Exception as e:
+        # Never crash the app because of migration helper
+        print("[AVISO] ensure_schema falhou (seguindo sem migração automática):", e)
+
+def get_capacidade() -> int:
+    """Capacidade de alunos por tutor (entre 16 e 18)."""
+    cfg = Config.query.filter_by(chave="capacidade").first()
+    try:
+        val = int(cfg.valor) if cfg else 18
+    except Exception:
+        val = 18
+    return max(16, min(18, val))
+
+
+def set_capacidade(value: int) -> int:
+    value = max(16, min(18, int(value)))
+    cfg = Config.query.filter_by(chave="capacidade").first()
+    if not cfg:
+        cfg = Config(chave="capacidade", valor=str(value))
+        db.session.add(cfg)
+    else:
+        cfg.valor = str(value)
+    db.session.commit()
+    return value
+
+
+def admin_password_ok(pwd: str) -> bool:
+    return pwd == os.environ.get("ADMIN_PASSWORD", "1243##")
+
+
+def require_admin():
+    return session.get("admin") is True
+
+
+# ---------------------------
+# App factory
+# ---------------------------
 def create_app():
-    # Carrega variáveis do arquivo .env (útil no Windows/local)
-    load_dotenv()
+    app = Flask(__name__)
 
-    app = Flask(__name__, static_folder="static", template_folder="templates")
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    # Secret key (set on Render!)
+    app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key-change-me")
 
-    app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
-    admin_password = os.environ.get("ADMIN_PASSWORD", "1243##")
-    app.config["ADMIN_PASSWORD"] = admin_password
+    raw_db_url = os.environ.get("DATABASE_URL", "")
+    db_url = normalize_database_url(raw_db_url)
 
-    db_url = os.environ.get("DATABASE_URL", "")
+    # If DATABASE_URL is missing, don't crash (use local sqlite so deploy doesn't exit)
     if not db_url:
-        raise RuntimeError(
-            "DATABASE_URL não foi definido. Configure no Render (Environment) ou em .env local."
-        )
-    app.config["SQLALCHEMY_DATABASE_URI"] = normalize_database_url(db_url)
+        db_url = "sqlite:///data.db"
+        print("[AVISO] DATABASE_URL não definido. Usando SQLite local (data.db). "
+              "No Render, configure DATABASE_URL em Environment para usar Postgres.")
+
+    app.config["SQLALCHEMY_DATABASE_URI"] = db_url
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
     db.init_app(app)
 
     with app.app_context():
         db.create_all()
-        seed_tutores()
 
-    # -----------------------------
-    # Helpers
-    # -----------------------------
-    def require_admin():
-        return bool(session.get("admin_ok"))
+        ensure_schema()
+        # default capacidade
+        if not Config.query.filter_by(chave="capacidade").first():
+            db.session.add(Config(chave="capacidade", valor="18"))
+            db.session.commit()
 
-    def is_valid_name(s: str) -> bool:
-        if not s:
-            return False
-        s = s.strip()
-        if len(s) < 3 or len(s) > 80:
-            return False
-        # permite letras, acentos, espaços e pontuação básica
-        return bool(re.fullmatch(r"[A-Za-zÀ-ÿ0-9 .,'\-]{3,80}", s))
-
-    def is_valid_serie(s: str) -> bool:
-        if not s:
-            return False
-        s = s.strip()
-        return 1 <= len(s) <= 20
-
-    # -----------------------------
-    # Pages
-    # -----------------------------
+    # ---------------------------
+    # Public routes
+    # ---------------------------
     @app.get("/")
-    def page_vote():
-        return render_template("index.html")
-
-    @app.get("/admin")
-    def page_admin():
-        if not require_admin():
-            return redirect(url_for("page_admin_login"))
-        return render_template("admin.html")
-
-    @app.get("/admin/login")
-    def page_admin_login():
-        if require_admin():
-            return redirect(url_for("page_admin"))
-        return render_template("admin_login.html")
-
-    @app.get("/admin/logout")
-    def admin_logout():
-        session.pop("admin_ok", None)
-        return redirect(url_for("page_admin_login"))
-
-    # -----------------------------
-    # Public API
-    # -----------------------------
-    @app.get("/api/tutores")
-    def api_tutores():
+    def index():
         tutores = Tutor.query.filter_by(ativo=True).order_by(Tutor.nome.asc()).all()
-        return jsonify([{"id": t.id, "nome": t.nome} for t in tutores])
+        return render_template("index.html", tutores=tutores)
 
     @app.post("/api/votar")
     def api_votar():
-        data = request.get_json(force=True, silent=True) or {}
+        data = request.get_json(silent=True) or request.form
         aluno = (data.get("aluno") or "").strip()
         serie = (data.get("serie") or "").strip()
         tutor_id = data.get("tutor_id")
 
-        if not is_valid_name(aluno):
-            return jsonify({"ok": False, "error": "Nome inválido. Digite seu nome completo."}), 400
-        if not is_valid_serie(serie):
-            return jsonify({"ok": False, "error": "Série inválida."}), 400
+        if not aluno or not serie or not tutor_id:
+            return jsonify({"ok": False, "error": "Preencha aluno, série e tutor."}), 400
+
         try:
             tutor_id = int(tutor_id)
         except Exception:
-            return jsonify({"ok": False, "error": "Selecione um tutor(a)."}), 400
+            return jsonify({"ok": False, "error": "Tutor inválido."}), 400
 
         tutor = Tutor.query.filter_by(id=tutor_id, ativo=True).first()
         if not tutor:
-            return jsonify({"ok": False, "error": "Tutor(a) não encontrado(a)."}), 404
+            return jsonify({"ok": False, "error": "Tutor não encontrado."}), 404
 
-        # registro do voto
-        ip = (request.headers.get("X-Forwarded-For", request.remote_addr) or "")[:80]
-        ua = (request.headers.get("User-Agent") or "")[:200]
-
-        voto = Voto(aluno=aluno, serie=serie, tutor_id=tutor.id, ip=ip, user_agent=ua)
+        voto = Voto(aluno_nome=aluno, serie=serie, tutor_id=tutor.id)
         db.session.add(voto)
         db.session.commit()
 
-        return jsonify({"ok": True, "message": "Voto confirmado com sucesso!", "tutor": tutor.nome})
+        return jsonify({"ok": True})
 
-    @app.get("/api/resultados")
-    def api_resultados():
-        """
-        Retorna:
-        - contagem por tutor
-        - total de votos
-        - para cada tutor acima de 100 votos, se existe amostragem e quantos selecionados
-        """
-        # SQL simples para performance
-        rows = db.session.execute(
-            db.text("""
-                SELECT t.id, t.nome, COUNT(v.id) AS votos
-                FROM tutores t
-                LEFT JOIN votos v ON v.tutor_id = t.id
-                WHERE t.ativo = true
-                GROUP BY t.id, t.nome
-                ORDER BY votos DESC, t.nome ASC
-            """)
-        ).all()
+    # ---------------------------
+    # Admin auth
+    # ---------------------------
+    @app.get("/gestao/login")
+    def gestao_login_page():
+        return render_template("login.html")
 
-        total = sum(int(r.votos) for r in rows)
+    @app.post("/gestao/login")
+    def gestao_login():
+        pwd = (request.form.get("senha") or "").strip()
+        if admin_password_ok(pwd):
+            session["admin"] = True
+            return redirect(url_for("gestao"))
+        return render_template("login.html", erro="Senha incorreta.")
 
-        # amostragem mais recente por tutor
-        amostras = db.session.execute(
-            db.text("""
-                SELECT a.tutor_id, a.id AS amostragem_id, a.quantidade, a.criado_em
-                FROM amostragens a
-                JOIN (
-                    SELECT tutor_id, MAX(id) AS max_id
-                    FROM amostragens
-                    GROUP BY tutor_id
-                ) x ON x.tutor_id = a.tutor_id AND x.max_id = a.id
-            """)
-        ).all()
-        am_map = {int(a.tutor_id): {"amostragem_id": int(a.amostragem_id), "quantidade": int(a.quantidade), "criado_em": a.criado_em.isoformat()} for a in amostras}
+    @app.get("/gestao/logout")
+    def gestao_logout():
+        session.clear()
+        return redirect(url_for("index"))
 
-        out = []
-        for r in rows:
-            tid = int(r.id)
-            votos = int(r.votos)
-            item = {"id": tid, "nome": r.nome, "votos": votos}
-            if votos > 100:
-                item["precisa_amostragem"] = True
-                item["amostragem"] = am_map.get(tid)
-            else:
-                item["precisa_amostragem"] = False
-                item["amostragem"] = None
-            out.append(item)
+    @app.get("/gestao")
+    def gestao():
+        if not require_admin():
+            return redirect(url_for("gestao_login_page"))
+        tutores = Tutor.query.order_by(Tutor.nome.asc()).all()
+        capacidade = get_capacidade()
+        return render_template("gestao.html", tutores=tutores, capacidade=capacidade)
 
-        return jsonify({"total": total, "tutores": out})
+    # ---------------------------
+    # Admin APIs
+    # ---------------------------
+    @app.get("/api/admin/tutores")
+    def api_admin_tutores_list():
+        if not require_admin():
+            return jsonify({"ok": False, "error": "Não autorizado"}), 401
 
-    # -----------------------------
-    # Admin API
-    # -----------------------------
-    @app.post("/api/admin/login")
-    def api_admin_login():
-        data = request.get_json(force=True, silent=True) or {}
-        senha = (data.get("senha") or "")
-        if senha == app.config["ADMIN_PASSWORD"]:
-            session["admin_ok"] = True
-            return jsonify({"ok": True})
-        return jsonify({"ok": False, "error": "Senha incorreta."}), 401
-
-    @app.get("/api/admin/me")
-    def api_admin_me():
-        return jsonify({"ok": bool(session.get("admin_ok"))})
+        tutores = Tutor.query.order_by(Tutor.nome.asc()).all()
+        return jsonify({"ok": True, "tutores": [
+            {"id": t.id, "nome": t.nome, "ativo": t.ativo}
+            for t in tutores
+        ]})
 
     @app.post("/api/admin/tutores")
-    def api_admin_add_tutor():
+    def api_admin_tutores_add():
         if not require_admin():
-            return jsonify({"ok": False, "error": "Não autorizado."}), 401
-        data = request.get_json(force=True, silent=True) or {}
-        nome = (data.get("nome") or "").strip().upper()
-        if not nome or len(nome) < 3:
-            return jsonify({"ok": False, "error": "Nome inválido."}), 400
+            return jsonify({"ok": False, "error": "Não autorizado"}), 401
 
-        existente = Tutor.query.filter(db.func.upper(Tutor.nome) == nome).first()
-        if existente:
-            existente.ativo = True
-            existente.nome = nome
+        data = request.get_json(silent=True) or {}
+        nome = (data.get("nome") or "").strip()
+        if not nome:
+            return jsonify({"ok": False, "error": "Informe o nome do tutor."}), 400
+
+        existing = Tutor.query.filter(db.func.lower(Tutor.nome) == nome.lower()).first()
+        if existing:
+            existing.ativo = True
             db.session.commit()
-            return jsonify({"ok": True, "message": "Tutor reativado/atualizado.", "id": existente.id})
+            return jsonify({"ok": True, "id": existing.id, "reused": True})
 
         t = Tutor(nome=nome, ativo=True)
         db.session.add(t)
         db.session.commit()
-        return jsonify({"ok": True, "message": "Tutor adicionado.", "id": t.id})
+        return jsonify({"ok": True, "id": t.id})
 
     @app.delete("/api/admin/tutores/<int:tutor_id>")
-    def api_admin_remove_tutor(tutor_id: int):
+    def api_admin_tutores_delete(tutor_id: int):
         if not require_admin():
-            return jsonify({"ok": False, "error": "Não autorizado."}), 401
+            return jsonify({"ok": False, "error": "Não autorizado"}), 401
+
         t = Tutor.query.get(tutor_id)
         if not t:
-            return jsonify({"ok": False, "error": "Tutor não encontrado."}), 404
-        t.ativo = False
+            return jsonify({"ok": False, "error": "Tutor não encontrado"}), 404
+
+        db.session.delete(t)
         db.session.commit()
-        return jsonify({"ok": True, "message": "Tutor removido (desativado)."})
+        return jsonify({"ok": True})
 
-
-    @app.post("/api/admin/amostragem/<int:tutor_id>")
-    def api_admin_gerar_amostragem(tutor_id: int):
-        """
-        Para tutores com mais de 100 votos, gera uma amostragem aleatória de 16 a 18 alunos.
-        Guarda no banco (amostragem + itens) e retorna a lista selecionada.
-        """
+    @app.post("/api/admin/capacidade")
+    def api_admin_capacidade():
         if not require_admin():
-            return jsonify({"ok": False, "error": "Não autorizado."}), 401
+            return jsonify({"ok": False, "error": "Não autorizado"}), 401
+        data = request.get_json(silent=True) or {}
+        cap = data.get("capacidade")
+        if cap is None:
+            return jsonify({"ok": False, "error": "capacidade ausente"}), 400
+        cap = set_capacidade(int(cap))
+        return jsonify({"ok": True, "capacidade": cap})
 
-        tutor = Tutor.query.filter_by(id=tutor_id, ativo=True).first()
-        if not tutor:
-            return jsonify({"ok": False, "error": "Tutor não encontrado."}), 404
+    @app.get("/api/admin/resultados")
+    def api_admin_resultados():
+        if not require_admin():
+            return jsonify({"ok": False, "error": "Não autorizado"}), 401
 
-        votos = Voto.query.filter_by(tutor_id=tutor_id).order_by(Voto.criado_em.asc()).all()
-        qtd_votos = len(votos)
-        if qtd_votos == 0:
-            return jsonify({"ok": False, "error": "Esse tutor ainda não recebeu votos."}), 400
+        capacidade = get_capacidade()
 
-        if qtd_votos <= 100:
-            # abaixo do limite: retorna a lista completa
-            return jsonify({
-                "ok": True,
-                "message": "Tutor com até 100 votos: lista completa (sem amostragem).",
-                "tutor": tutor.nome,
-                "amostragem": None,
-                "selecionados": [{"aluno": v.aluno, "serie": v.serie, "data": v.criado_em.isoformat()} for v in votos],
+        tutores = Tutor.query.order_by(Tutor.nome.asc()).all()
+        out = []
+        total_geral = 0
+
+        for t in tutores:
+            votos = (Voto.query
+                     .filter_by(tutor_id=t.id)
+                     .order_by(Voto.created_at.asc(), Voto.id.asc())
+                     .all())
+            total = len(votos)
+            total_geral += total
+
+            selecionados = votos[:capacidade]
+            fora = votos[capacidade:]
+
+            out.append({
+                "id": t.id,
+                "nome": t.nome,
+                "ativo": t.ativo,
+                "total": total,
+                "capacidade": capacidade,
+                "selecionados": [
+                    {"aluno": v.aluno_nome, "serie": v.serie, "data": (v.created_at.isoformat() if v.created_at else "")}
+                    for v in selecionados
+                ],
+                "fora": [
+                    {"aluno": v.aluno_nome, "serie": v.serie, "data": (v.created_at.isoformat() if v.created_at else "")}
+                    for v in fora
+                ],
             })
 
-        n = random.randint(16, 18)
-        n = min(n, qtd_votos)
-        seed = int(utcnow().timestamp())
-        rng = random.Random(seed)
-        selecionados = rng.sample(votos, k=n)
-
-        # salva
-        a = Amostragem(tutor_id=tutor_id, quantidade=n, seed=seed)
-        db.session.add(a)
-        db.session.flush()  # pega a.id
-
-        for v in selecionados:
-            db.session.add(AmostraItem(amostragem_id=a.id, voto_id=v.id))
-
-        db.session.commit()
-
-        return jsonify({
-            "ok": True,
-            "message": "Amostragem gerada com sucesso.",
-            "tutor": tutor.nome,
-            "amostragem": {"id": a.id, "quantidade": n, "seed": seed, "criado_em": a.criado_em.isoformat()},
-            "selecionados": [{"aluno": v.aluno, "serie": v.serie, "data": v.criado_em.isoformat()} for v in selecionados],
-        })
-
-    @app.get("/api/admin/amostragem/<int:tutor_id>/ultima")
-    def api_admin_ver_ultima_amostragem(tutor_id: int):
-        if not require_admin():
-            return jsonify({"ok": False, "error": "Não autorizado."}), 401
-        tutor = Tutor.query.get(tutor_id)
-        if not tutor:
-            return jsonify({"ok": False, "error": "Tutor não encontrado."}), 404
-
-        a = Amostragem.query.filter_by(tutor_id=tutor_id).order_by(Amostragem.id.desc()).first()
-        if not a:
-            return jsonify({"ok": True, "message": "Ainda não existe amostragem para esse tutor.", "amostragem": None, "selecionados": []})
-
-        itens = (
-            db.session.query(Voto.aluno, Voto.serie, Voto.criado_em)
-            .join(AmostraItem, AmostraItem.voto_id == Voto.id)
-            .filter(AmostraItem.amostragem_id == a.id)
-            .order_by(Voto.aluno.asc())
-            .all()
-        )
-        return jsonify({
-            "ok": True,
-            "tutor": tutor.nome,
-            "amostragem": {"id": a.id, "quantidade": a.quantidade, "seed": a.seed, "criado_em": a.criado_em.isoformat()},
-            "selecionados": [{"aluno": i.aluno, "serie": i.serie, "data": i.criado_em.isoformat()} for i in itens],
-        })
+        return jsonify({"ok": True, "capacidade": capacidade, "total_geral": total_geral, "resultados": out})
 
     return app
 
 
-# -----------------------------
-# Models
-# -----------------------------
-class Tutor(db.Model):
-    __tablename__ = "tutores"
-    id = db.Column(db.Integer, primary_key=True)
-    nome = db.Column(db.String(120), unique=True, nullable=False)
-    ativo = db.Column(db.Boolean, default=True, nullable=False)
-    criado_em = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
-
-
-class Voto(db.Model):
-    __tablename__ = "votos"
-    id = db.Column(db.Integer, primary_key=True)
-    aluno = db.Column(db.String(80), nullable=False)
-    serie = db.Column(db.String(20), nullable=False)
-    tutor_id = db.Column(db.Integer, db.ForeignKey("tutores.id"), nullable=False)
-    criado_em = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
-    ip = db.Column(db.String(80))
-    user_agent = db.Column(db.String(200))
-
-
-class Amostragem(db.Model):
-    __tablename__ = "amostragens"
-    id = db.Column(db.Integer, primary_key=True)
-    tutor_id = db.Column(db.Integer, db.ForeignKey("tutores.id"), nullable=False)
-    quantidade = db.Column(db.Integer, nullable=False)
-    seed = db.Column(db.BigInteger, nullable=False)
-    criado_em = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
-
-
-class AmostraItem(db.Model):
-    __tablename__ = "amostragem_itens"
-    id = db.Column(db.Integer, primary_key=True)
-    amostragem_id = db.Column(db.Integer, db.ForeignKey("amostragens.id"), nullable=False)
-    voto_id = db.Column(db.Integer, db.ForeignKey("votos.id"), nullable=False)
-
-
-def seed_tutores():
-    # Se a tabela estiver vazia, insere a lista padrão
-    if Tutor.query.count() == 0:
-        for nome in DEFAULT_TUTORES:
-            db.session.add(Tutor(nome=nome.strip().upper(), ativo=True))
-        db.session.commit()
-
-
+# Gunicorn entrypoint
 app = create_app()
 
 if __name__ == "__main__":

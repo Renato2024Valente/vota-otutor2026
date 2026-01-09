@@ -1,7 +1,3 @@
-databases:
-  - name: tutor2026-db
-    plan: free
-
 services:
   - type: web
     name: tutor-votacao-2026
@@ -9,12 +5,4 @@ services:
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
-    envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: tutor2026-db
-          property: connectionString
-      - key: ADMIN_PASSWORD
-        value: "1243##"
-      - key: SECRET_KEY
-        value: "Xc_Xx0ajPns7-VLIXNOZeE3hF0mfFjF6vSD6gOzSVSw"
+    autoDeploy: true

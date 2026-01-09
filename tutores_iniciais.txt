@@ -1,0 +1,6 @@
+# Cole aqui a lista EXATA de professores (um por linha).
+# O sistema só usa este arquivo se a tabela "tutores" estiver vazia.
+# Depois de subir e gravar no banco, você pode administrar (adicionar/remover) pela Gestão.
+
+Renato Valente
+Eliza

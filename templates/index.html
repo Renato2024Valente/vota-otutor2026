@@ -1,67 +1,103 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="row g-4 align-items-stretch">
-  <div class="col-lg-7">
-    <div class="card shadow-sm h-100">
-      <div class="card-body p-4">
-        <h1 class="h4 mb-2">Escolha seu Tutor</h1>
-        <p class="text-muted mb-4">Preencha seus dados e selecione o professor tutor. O registro é imediato.</p>
-
-        <form id="formVoto" class="row g-3">
-          <div class="col-12">
-            <label class="form-label">Nome do aluno</label>
-            <input class="form-control" name="aluno" required placeholder="Ex: João Pedro da Silva">
-          </div>
-
-          <div class="col-md-6">
-            <label class="form-label">Série</label>
-            <select class="form-select" name="serie" required>
-              <option value="">Selecione</option>
-              <option>1º Ano</option>
-              <option>2º Ano</option>
-              <option>3º Ano</option>
-              <option>9º Ano</option>
-              <option>8º Ano</option>
-              <option>7º Ano</option>
-            </select>
-          </div>
-
-          <div class="col-md-6">
-            <label class="form-label">Tutor</label>
-            <select class="form-select" name="tutor_id" required>
-              <option value="">Selecione</option>
-              {% for t in tutores %}
-                <option value="{{ t.id }}">{{ t.nome }}</option>
-              {% endfor %}
-            </select>
-          </div>
-
-          <div class="col-12 d-grid">
-            <button class="btn btn-primary btn-lg" type="submit">Confirmar voto</button>
-          </div>
-        </form>
-
-        <div id="msg" class="alert mt-3 d-none" role="alert"></div>
+<div class="row justify-content-center">
+  <div class="col-12 col-md-8 col-lg-6">
+    <div class="card-glass p-4 shadow-sm">
+      <div class="d-flex justify-content-between align-items-start gap-3">
+        <div>
+          <h1 class="h4 mb-1">Votação do Tutor</h1>
+          <div class="muted small">Escolha sua série e o tutor. Funciona no celular.</div>
+        </div>
+        <span class="badge badge-soft align-self-start">2026</span>
       </div>
+
+      <hr class="border-light border-opacity-10 my-3">
+
+      <form id="voteForm" class="vstack gap-3" method="post" action="/vote">
+        <div>
+          <label class="form-label">Nome do aluno</label>
+          <input id="aluno_nome" name="aluno_nome" class="form-control form-control-lg" placeholder="Digite seu nome" required>
+        </div>
+
+        <div>
+          <label class="form-label">Série</label>
+          <select id="serie" name="serie" class="form-select form-select-lg" required>
+            <option value="" selected>Selecione...</option>
+            {% for s in series %}
+              <option value="{{ s }}">{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label class="form-label">Tutor</label>
+          <select id="tutor_id" name="tutor_id" class="form-select form-select-lg" required>
+            <option value="" selected>Selecione...</option>
+            {% for t in tutores %}
+              <option value="{{ t.id }}">{{ t.nome }}</option>
+            {% endfor %}
+          </select>
+          <div class="muted small mt-2">Só aparecem tutores <b>ativos</b>.</div>
+        </div>
+
+        <button class="btn btn-primary btn-big w-100" type="submit">Confirmar Voto</button>
+
+        <div id="msg" class="small-note muted"></div>
+      </form>
     </div>
-  </div>
 
-  <div class="col-lg-5">
-    <div class="card shadow-sm h-100 bg-soft">
-      <div class="card-body p-4">
-        <h2 class="h5 mb-3">Regras</h2>
-        <ul class="mb-0 text-muted">
-          <li>O voto registra: aluno, série e tutor escolhido.</li>
-          <li>Na Gestão, a lista é atualizada automaticamente.</li>
-          <li>Capacidade por tutor (16 a 18) configurável na Gestão.</li>
-          <li>Se passar da capacidade, os demais ficam na lista “Fora” (visível na Gestão).</li>
-        </ul>
-      </div>
+    <div class="text-center muted mt-3 small">
+      Se der erro, avise a gestão. Seu voto não será perdido.
     </div>
   </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='public.js') }}"></script>
+<script>
+const form = document.getElementById("voteForm");
+const msg = document.getElementById("msg");
+
+function setMsg(text, ok=true) {
+  msg.className = "small-note " + (ok ? "text-success" : "text-warning");
+  msg.textContent = text;
+}
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+
+  const aluno_nome = document.getElementById("aluno_nome").value.trim();
+  const serie = document.getElementById("serie").value;
+  const tutor_id = document.getElementById("tutor_id").value;
+
+  if (!aluno_nome || !serie || !tutor_id) {
+    setMsg("Preencha nome, série e tutor.", false);
+    return;
+  }
+
+  setMsg("Enviando voto...", true);
+
+  try {
+    const res = await fetch("/api/vote", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({aluno_nome, serie, tutor_id})
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.ok) {
+      setMsg(data.message || "Não foi possível registrar. Tente novamente.", false);
+      return;
+    }
+
+    setMsg(data.message || "Voto registrado!", true);
+    document.getElementById("aluno_nome").value = "";
+    document.getElementById("aluno_nome").focus();
+  } catch (err) {
+    // Se o fetch falhar (ex.: navegador bloqueou), tenta o POST normal do formulário.
+    setMsg("Sem conexão no momento. Enviando pelo modo alternativo...", false);
+    try { form.submit(); } catch (e2) {}
+  }
+});
+</script>
 {% endblock %}

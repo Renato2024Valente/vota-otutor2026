@@ -18,11 +18,11 @@ DEFAULT_CAPACITY = 16
 
 # Séries fixas (não muda)
 SERIES = [
-    "6º Ano A", "6º Ano B", "6º Ano C", "6º Ano D",
+    "6º Ano A", "6º Ano B", "6º Ano C", "6º Ano D","6º Ano E",
     "7º Ano A", "7º Ano B", "7º Ano C", "7º Ano D",
     "8º Ano A", "8º Ano B", "8º Ano C", "8º Ano D",
     "9º Ano A", "9º Ano B", "9º Ano C", "9º Ano D",
-    "1º Ano A", "1º Ano B", "1º Ano C",
+    "1º Ano A", "1º Ano B", "1º Ano C","1º Ano D",
     "2º Ano A", "2º Tec",
     "3º Ano A", "3º Ano B",
 ]
